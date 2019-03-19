@@ -704,10 +704,239 @@ ratings_ML <- ratings_ML[-NAs,]
 
 We are now ready to use our data for Machine Learning purposes. We will begin by splitting our **ratings_ML** dataset into a **training_set** and a **testing_set**.
 
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Test set will be 10% of Ratings_ML data
+
+set.seed(1)
+test_index <- createDataPartition(y = ratings_ML$points, times = 1, p = 0.10, list = FALSE)
+train_set <- ratings_ML[-test_index,]
+temp_set <- ratings_ML[test_index,]
+
+# Make sure country, province, taster_name, variety, winery and vintage are also in the training set
+
+test_set <- temp_set %>% 
+      semi_join(train_set, by = "country") %>%
+      semi_join(train_set, by = "province") %>%
+      semi_join(train_set, by = "taster_name") %>%
+      semi_join(train_set, by = "variety") %>%
+      semi_join(train_set, by = "winery") %>%
+      semi_join(train_set, by = "Vintage")
+
+# Add rows removed from test set set back into train set
+
+removed_rows <- anti_join(temp_set, test_set)
+train_set <- rbind(train_set, removed_rows)
+
+rm(removed_rows, temp_set, test_index)
+```
+
+Great, now, let's give ourselves a benchmark. What if we predicted the average rating for each wine?
+
 ```{r}
+
+average_rating <- mean(train_set$points)
+
+naiveRMSE <- RMSE(test_set$points,average_rating)
+
+rmse_results <- bind_rows(data_frame(Method = "Just the average", RMSE = naiveRMSE))
+
+kable(rmse_results,align=rep("c",3)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+Here, we get a RMSE of about 3.0455. Not great. We are on average 3 full points away from the correct rating.
+
+To improve on this, we will construct a model with the following structure. We do not want to train our ML algorithms just yet because the computation would take too long.
+
+$$
+Y_{c,t,v} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v + \varepsilon_{c,t,v}
+$$
+
+In this model, $\mu$ is the average rating in the training set, $\hat{b}_c$ is the country effect that takes into account the fact that some countries tend to be rated higher, $\hat{b}_t$ is the taster effect that takes into account the fact that some tasters tend to give higher ratings, $\hat{b}_v$ is the vintage effect that takes into account the fact that some vintage tend to be rated higher than others, at least in this dataset. Finally, $\varepsilon_{c,t,v}$ is the residual when using only this linear model.
+
+Once that model is optimized, we will try to minimize $\varepsilon_{c,t,v}$ by using machine learning algorithms such that:
+
+$$
+\varepsilon_{c,t,v}=Z_{c,t,v}+\varepsilon_{z,c,t,v}
+$$
+
+where $\varepsilon_{z,c,t,v}$ is what we are striving to minimize and $Z_{c,t,v}$ is the contribution of our machine learning algorithms.
+
+#####Country Effect
+
+Some countries, one average, rate higher than others. We would call this the **country effect**. For each wine, the country effect is calculated as the average of $Y_{c,t,v} - \hat{\mu}$ for each country $c$.
+
+We calculate it using this piece of code:
+
+```{r}
+country_avgs <- train_set %>% 
+  group_by(country) %>% 
+  summarize(country_effect = mean(points - average_rating))
+```
+
+We can see that these estimates vary substantially from -6 to +3.
+
+```{r}
+country_avgs %>% qplot(country_effect, geom ="histogram", bins = 10, data = ., color = I("black"))
+```
+
+We can now try to estimate each observation of the test set using this country effect. To be clear, this is the model we are trying, where $\mu$ is the average rating, $b_c$ is the movie_effect and $\varepsilon_{c,t,v}$ is the error term:
+  
+$$
+Y_{c,t,v} = \mu + b_c + \varepsilon_{u,i}
+$$
+```{r}
+predicted_ratings <- average_rating + test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  .$country_effect
+
+country_effect_RMSE <- RMSE(predicted_ratings, test_set$points)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Country Effect",
+                                     RMSE=country_effect_RMSE))
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+This is already an improvement. We could dive into regularization of this effect, but we decide not to here for the sake of expediency. Note that we have tried it on the side and it doesn't help much.
+
+#####Taster Effect
+
+Now, we turn our attention to tasters. Some of them, as we saw before, tend to rate higher than others. Here we can calculate the **taster effect** which is a taster-specific effect once the **country effect** has been taken into consideration.
+
+To be clear, this is the model we are trying, where $\mu$ is the average rating, $\hat{b}_c$ is the regularized_movie_effect, $\hat{b}_t$ is the user-specific effect and $\varepsilon_{c,t,v}$ is the error term:
+  
+$$
+Y_{c,t,v} = \mu + \hat{b}_c +\hat{b}_t + \varepsilon_{c,t,v}
+$$
+
+```{r}
+taster_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  group_by(taster_name) %>%
+  summarize(taster_effect = mean(points - average_rating - country_effect))
+```
+
+Let's create predictions see how it improves our model.
+
+```{r}
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  mutate(pred = average_rating + country_effect + taster_effect) %>%
+  .$pred
+
+country_and_taster_effect <- RMSE(predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Country & Taster Effects",
+                                     RMSE=country_and_taster_effect))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+#####Vintage Effect
+
+We now turn our attention to the vintage variable and make a similar analysis.
+
+```{r}
+vintage_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>% 
+  group_by(Vintage) %>%
+  summarize(vintage_effect = mean(points - average_rating - country_effect - taster_effect))
+
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect) %>%
+  .$pred
+
+country_taster_vintage_effect_RMSE <- RMSE(predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Country & Taster & Vintage Effects",
+                                     RMSE=country_taster_vintage_effect_RMSE))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
 
 ```
 
+At this point, we have completed our model, and only improved our RMSE by about 5%, which is not great. We are hopeful that the other variables will be helpful.
+
+#####Creating a New "Target"
+
+As mentioned before, we have now created this model:
+
+$$
+Y_{c,t,v} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v + \varepsilon_{c,t,v}
+$$
+We now want to predict $\varepsilon_{c,t,v}$ using Machine Learning algorithms and the variables we haven't used yet.
+
+we will try to minimize $\varepsilon_{c,t,v}$ by using machine learning algorithms such that:
+
+$$
+\varepsilon_{c,t,v}=Z_{c,t,v}+\varepsilon_{z,c,t,v}
+$$
+
+where $\varepsilon_{z,c,t,v}$ is what we are striving to minimize and $Z_{c,t,v}$ is the contribution of our machine learning algorithms.
+
+Therefore, we need to add avariable to our **Ratings_ML** set that is our current $\varepsilon_{c,t,v}$.
+
+```{r}
+
+predicted_ratings_train <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect) %>%
+  .$pred
+
+train_set <- train_set %>% mutate(epsilon = points - predicted_ratings_train)
+test_set <- test_set %>% mutate(epsilon = points - predicted_ratings)
+
+```
+
+#####Machine Learning Algorithms
+
+Below, we train linear regression to minimize the errors when predicting **epsilon**.
+
+```{r}
+
+glm_trained <- train(epsilon ~ price+Lenght+lexical_diversity+lexical_density+repetition+large_word_count+adjectives_count+noun_count+verb_count+good_words, method="glm", data = train_set )
+
+```
+
+Let's now test wether we can improve our results.
+
+```{r}
+glm_predicted_ratings <- predicted_ratings+predict(glm_trained,test_set)
+
+glm_RMSE <- RMSE(glm_predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Linear Regression on Epsilon",
+                                     RMSE=glm_RMSE))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
+Great! Our current RMSE is now `r paste(round(100*(naiveRMSE-glm_RMSE)/naiveRMSE,2),"%",sep="")` better than our "Just the average" RMSE.
 
 ##Results
 

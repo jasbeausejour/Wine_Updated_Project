@@ -47,7 +47,7 @@ RMSE <- function(true_ratings, predicted_ratings){
 
 In this report, we will be using a dataset created by *zackthoutt* which can easily be downloaded from **Kaggle** at [this link]("https://www.kaggle.com/zynicide/wine-reviews"). To ensure that this code runs on a standalone basis, I include code that downloads the dataset into the user's temporary files from my GitHub repository.
 
-```{r Loading libraries, include=FALSE}
+```{r Loading libraries, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 library(tidyverse)
 
@@ -59,6 +59,15 @@ library(knitr)
 
 if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
 library(kableExtra)
+
+if(!require(udpipe)) install.packages("udpipe", repos = "http://cran.us.r-project.org")
+library(udpipe)
+
+if(!require(igraph)) install.packages("igraph", repos = "http://cran.us.r-project.org")
+library(igraph)
+
+if(!require(ggraph)) install.packages("ggraph", repos = "http://cran.us.r-project.org")
+library(ggraph)
 ```
 
 This report will contain four main sections. 
@@ -547,9 +556,158 @@ save(words_in_descriptions, file = "words_in_descriptions.rda")
 Because of how long the above step takes, I've decided to save a copy of that data frame to my GitHub repository. I've deactivated the above code and instead am downloading the file here.
 
 ```{r}
-githubURL <- url("https://github.com/jasbeausejour/Wine_Project/blob/master/words_in_description.rda?raw=true")
+githubURL <- url("https://github.com/jasbeausejour/Wine_Updated_Project/blob/master/Data/words_in_description.rda?raw=true")
 print(load(githubURL))
 ```
+
+The first thing we can look at is the lenght of the descriptions.
+
+```{r}
+length_of_decription <- words_in_descriptions %>% group_by(doc_id) %>% summarise(Length=n()) %>% mutate(X=as.integer(doc_id)) %>% select(X,Length)
+
+length_of_decription %>% ggplot(aes(x=Length))+
+  geom_histogram(bins=50)+
+  labs(title="Distribution of description length",x="Lenght",y="Count")
+
+```
+Let us see if there seems to be a relationship between the length of the descriptions and the points.
+
+```{r}
+# Adding the length of description as a variable in ratings
+ratings <- ratings %>% left_join(length_of_decription,by = "X")
+
+ratings %>% ggplot(aes(x=Length,y=points))+
+  geom_point()+
+  labs(title="Relationship between description length and points", x="Description length (words)", y="Points")
+```
+
+Next, let's look at the most popular root words being used.
+
+```{r}
+words_in_descriptions %>% group_by(lemma) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  top_n(10,Count) %>% 
+  select(`Root Word`=lemma,Count) %>% 
+  kable(align = c("c","c")) %>% 
+  kable_styling(full_width = F)
+```
+
+Of course, the word wine and flavor appear quite a lot. After that, most of the common words are very important descriptors of wine. Apart from **aroma**, however, we notice that tasters mostly focus on the mouth elements of the wine, while the visual aspects and the nose are being left out slightly.
+
+We can also take a look at what nouns and adjectives are often used together.
+
+```{r}
+cooc <- cooccurrence(x = subset(words_in_descriptions, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", 
+                     group = c("doc_id", "paragraph_id", "sentence_id"))
+
+kable(cooc[1:5,],align = rep("c",3)) %>% 
+  kable_styling(full_width = F)
+```
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+wordnetwork <- head(cooc, 40)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc), edge_colour = "pink") +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial") +
+  theme(legend.position = "none") +
+  labs(title = "Cooccurrences within sentence", subtitle = "Nouns & Adjective")
+```
+
+From the above, we can clearly see that it is very common for a wine to have cherry flavor or/and black fruit flavor. Other words that are often associated with flavor are: spice, finish (as in the wine's finish), palate, ripe, acidity and tannins.
+
+Let's see which words are within the top 50 most common for bottles scoring 95+, but not within the top 50 for bottles scoring lower
+
+```{r}
+words_in_descriptions <- words_in_descriptions %>% mutate(X=as.integer(doc_id)) %>% 
+  left_join(ratings, by = "X") %>% select(X,word,lemma,upos,points,price)
+
+top_50_good <- words_in_descriptions %>% filter(points>=95) %>% group_by(lemma) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  top_n(50,Count) 
+
+top_50_lessthangood <- words_in_descriptions %>% filter(points<95) %>% group_by(lemma) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  top_n(50,Count) 
+
+good_predictor_words <- top_50_good %>% anti_join(top_50_lessthangood, by="lemma") %>% .$lemma
+
+print(good_predictor_words)
+```
+
+```{r CleanupAgain, include=FALSE}
+rm(cooc,length_of_decription,top_50_good,top_50_lessthangood,variables,wordnetwork)
+```
+
+
+Let us now create some more descriptors that relate to each descriptions, and add those to our **ratings** dataset. This is called "feature engineering".
+
+We add: lenght of descrition in words, the lexical diversity (distinct words), lexical density (diversity as % of total words), repetition (Length/diversity), number of large words with 8 or more characters, number of adjectives, number of nouns, number of verbs and, most importantly, number of words that are in the list of words typically associated with very good bottles as defined above.
+
+```{r}
+descriptors <- words_in_descriptions %>% group_by(X) %>% 
+  summarise(Length = n(),
+            lexical_diversity = n_distinct(word),
+            lexical_density = lexical_diversity/Length,
+            repetition = Length/lexical_diversity,
+            large_word_count = sum(ifelse((nchar(word) > 7), 1, 0)),
+            adjectives_count = sum(ifelse(upos == "ADJ",1,0)),
+            noun_count = sum(ifelse(upos == "NOUN",1,0)),
+            verb_count = sum(ifelse(upos == "VERB",1,0)),
+            good_words = sum(ifelse(lemma %in% good_predictor_words,1,0)))
+  
+```
+
+We now add these descriptors to the **ratings** dataframe.
+
+```{r}
+#Adding the descriptors
+ratings <- ratings %>% left_join(descriptors,by = "X")
+
+#Cleaning the environment
+rm(descriptors, words_in_descriptions)
+
+#Selecting only the variables which we intend to use in our analysis and creating a ratings set for machine learning purposes
+
+ratings_ML <- ratings %>% 
+  select(X,
+         country,
+         price,
+         province,
+         taster_name,
+         variety,
+         winery,
+         Vintage,
+         Lenght=Length.x,
+         lexical_diversity,
+         lexical_density,
+         repetition,
+         large_word_count,
+         adjectives_count,
+         noun_count,
+         verb_count,
+         good_words,
+         points)
+
+#Removing bottles for which pric is not available
+
+NAs <- which(is.na(ratings_ML$price))
+ratings_ML <- ratings_ML[-NAs,]
+```
+
+####Modelling
+
+We are now ready to use our data for Machine Learning purposes. We will begin by splitting our **ratings_ML** dataset into a **training_set** and a **testing_set**.
+
+```{r}
+
+```
+
 
 ##Results
 

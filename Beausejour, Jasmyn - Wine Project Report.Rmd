@@ -19,6 +19,14 @@ Note 2: Running this code can easily take 9-11 minutes. The actual run time is i
 
 ##Executive Summary
 
+In this report, we will show that when asked to predict the score given to a wine bottle by a connoiseur (on 100), a simple guess of **88.42** would yield a Root Mean Square Error of around 3.06.
+
+We will further show that with the knowledge of the country of origin, the identity of the connoisseur, the vintage of the bottle, the winery that produced the wine, the variety of grape, and the province of origin, one would be able to reduce one's RMSE by about 23%.
+
+We then show that the layering of a simple linear regression model that takes into account the previous predictions, the price of the bottle and a few characteristics of the description given by the connoisseur can further improve RMSE by roughly 12%.
+
+In that linear regression, we show that the most important variables are 
+
 ##Introduction
 
 In our daily life, we are fans of wine. From the old world to the new world, from the darkest of reds to the crispest of whites, we love tasting everything we can get our hands one. Even though we have our personal preferences for dark, full-bodied reds like Tempranillos from Rioja or Amarone della Valpolicella, we are always eager to try new wines.
@@ -750,18 +758,22 @@ Here, we get a RMSE of about 3.0455. Not great. We are on average 3 full points 
 To improve on this, we will construct a model with the following structure. We do not want to train our ML algorithms just yet because the computation would take too long.
 
 $$
-Y_{c,t,v} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v + \varepsilon_{c,t,v}
+Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v+ \hat{b}_w +\hat{b}_va +\hat{b}_p + \varepsilon_{c,t,v,w,va,p}
 $$
 
-In this model, $\mu$ is the average rating in the training set, $\hat{b}_c$ is the country effect that takes into account the fact that some countries tend to be rated higher, $\hat{b}_t$ is the taster effect that takes into account the fact that some tasters tend to give higher ratings, $\hat{b}_v$ is the vintage effect that takes into account the fact that some vintage tend to be rated higher than others, at least in this dataset. Finally, $\varepsilon_{c,t,v}$ is the residual when using only this linear model.
+In this model, $\mu$ is the average rating in the training set.
 
-Once that model is optimized, we will try to minimize $\varepsilon_{c,t,v}$ by using machine learning algorithms such that:
+The various $\hat{b}$ are respectively the country, taster, vintage, winery, variety and province effect. We compute these sequentially such that each effect takes into consideration all the ones before. This is to speed up the process (as opposed to running a very large regression).
+
+Finally, $\varepsilon_{c,t,v,w,va,p}$ is the residual when using only this linear model.
+
+Once that model is optimized, we will try to minimize $\varepsilon_{c,t,v,w,va,p}$ by using machine learning algorithms such that:
 
 $$
-\varepsilon_{c,t,v}=Z_{c,t,v}+\varepsilon_{z,c,t,v}
+\varepsilon_{c,t,v,w,va,p}=Z_{c,t,v,w,va,p}+\varepsilon_{z,c,t,v,w,va,p}
 $$
 
-where $\varepsilon_{z,c,t,v}$ is what we are striving to minimize and $Z_{c,t,v}$ is the contribution of our machine learning algorithms.
+where $\varepsilon_{z,c,t,v,w,va,p}$ is what we are striving to minimize and $Z_{c,t,v,w,va,p}$ is the contribution of our machine learning algorithms.
 
 #####Country Effect
 
@@ -781,10 +793,10 @@ We can see that these estimates vary substantially from -6 to +3.
 country_avgs %>% qplot(country_effect, geom ="histogram", bins = 10, data = ., color = I("black"))
 ```
 
-We can now try to estimate each observation of the test set using this country effect. To be clear, this is the model we are trying, where $\mu$ is the average rating, $b_c$ is the movie_effect and $\varepsilon_{c,t,v}$ is the error term:
+We can now try to estimate each observation of the test set using this country effect. To be clear, this is the model we are trying, where $\mu$ is the average rating, $b_c$ is the movie_effect and $\varepsilon_{c,t,v,w,va,p}$ is the error term:
   
 $$
-Y_{c,t,v} = \mu + b_c + \varepsilon_{u,i}
+Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \varepsilon_{c,t,v,w,va,p}
 $$
 ```{r}
 predicted_ratings <- average_rating + test_set %>% 
@@ -808,10 +820,10 @@ This is already an improvement. We could dive into regularization of this effect
 
 Now, we turn our attention to tasters. Some of them, as we saw before, tend to rate higher than others. Here we can calculate the **taster effect** which is a taster-specific effect once the **country effect** has been taken into consideration.
 
-To be clear, this is the model we are trying, where $\mu$ is the average rating, $\hat{b}_c$ is the regularized_movie_effect, $\hat{b}_t$ is the user-specific effect and $\varepsilon_{c,t,v}$ is the error term:
+To be clear, this is the model we are trying, where $\mu$ is the average rating, $\hat{b}_c$ is the regularized_movie_effect, $\hat{b}_t$ is the user-specific effect and $\varepsilon_{c,t,v,w,va,p}$ is the error term:
   
 $$
-Y_{c,t,v} = \mu + \hat{b}_c +\hat{b}_t + \varepsilon_{c,t,v}
+Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \hat{b}_t+ \varepsilon_{c,t,v,w,va,p}
 $$
 
 ```{r}
@@ -875,6 +887,111 @@ kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set o
 
 At this point, we have completed our model, and only improved our RMSE by about 5%, which is not great. We are hopeful that the other variables will be helpful.
 
+#####Winery Effect
+
+We now turn our attention to the winery variable and make a similar analysis.
+
+```{r}
+winery_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>% 
+  group_by(winery) %>%
+  summarize(winery_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect))
+
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  left_join(winery_avgs,by='winery') %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect+winery_effect) %>%
+  .$pred
+
+country_taster_vintage_winery_effect_RMSE <- RMSE(predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Country & Taster & Vintage & Winery Effects",
+                                     RMSE=country_taster_vintage_winery_effect_RMSE))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
+#####Variety Effect
+
+We now turn our attention to the variety variable and make a similar analysis.
+
+```{r}
+variety_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>%
+  left_join(winery_avgs, by = 'winery') %>% 
+  group_by(variety) %>%
+  summarize(variety_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect - winery_effect))
+
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  left_join(winery_avgs,by='winery') %>%
+  left_join(variety_avgs,by='variety') %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect+winery_effect+variety_effect) %>%
+  .$pred
+
+country_taster_vintage_winery_variety_effect_RMSE <- RMSE(predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Country & Taster & Vintage & Winery & Variety Effects",
+                                     RMSE=country_taster_vintage_winery_variety_effect_RMSE))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
+#####Province Effect
+
+We now turn our attention to the province variable and make a similar analysis.
+
+```{r}
+province_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>%
+  left_join(winery_avgs, by = 'winery') %>% 
+  left_join(variety_avgs,by='variety') %>% 
+  group_by(province) %>%
+  summarize(province_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect - winery_effect - variety_effect))
+
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  left_join(winery_avgs,by='winery') %>%
+  left_join(variety_avgs,by='variety') %>%
+  left_join(province_avgs,by="province") %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect+winery_effect+variety_effect+province_effect) %>%
+  .$pred
+
+country_taster_vintage_winery_variety_province_effect_RMSE <- RMSE(predicted_ratings, test_set$points) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Country & Taster & Vintage & Winery & Variety & Province Effects",
+                                     RMSE=country_taster_vintage_winery_variety_province_effect_RMSE))
+
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
 #####Creating a New "Target"
 
 As mentioned before, we have now created this model:
@@ -887,12 +1004,12 @@ We now want to predict $\varepsilon_{c,t,v}$ using Machine Learning algorithms a
 we will try to minimize $\varepsilon_{c,t,v}$ by using machine learning algorithms such that:
 
 $$
-\varepsilon_{c,t,v}=Z_{c,t,v}+\varepsilon_{z,c,t,v}
+\varepsilon_{c,t,v,w,va,p}=Z_{c,t,v,w,va,p}+\varepsilon_{z,c,t,v,w,va,p}
 $$
 
-where $\varepsilon_{z,c,t,v}$ is what we are striving to minimize and $Z_{c,t,v}$ is the contribution of our machine learning algorithms.
+where $\varepsilon_{z,c,t,v,w,va,p}$ is what we are striving to minimize and $Z_{c,t,v,w,va,p}$ is the contribution of our machine learning algorithms.
 
-Therefore, we need to add avariable to our **Ratings_ML** set that is our current $\varepsilon_{c,t,v}$.
+Therefore, we need to add avariable to our **Ratings_ML** set that is our current $\varepsilon_{c,t,v,w,va,p}$.
 
 ```{r}
 
@@ -903,25 +1020,27 @@ predicted_ratings_train <- train_set %>%
   mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect) %>%
   .$pred
 
-train_set <- train_set %>% mutate(epsilon = points - predicted_ratings_train)
-test_set <- test_set %>% mutate(epsilon = points - predicted_ratings)
+train_set <- train_set %>% mutate(predicted_ratings = predicted_ratings_train,
+                                  epsilon = points - predicted_ratings_train)
+test_set <- test_set %>% mutate(predicted_ratings=predicted_ratings,
+                                epsilon = points - predicted_ratings)
 
 ```
 
 #####Machine Learning Algorithms
 
-Below, we train linear regression to minimize the errors when predicting **epsilon**.
+Below, we train linear regression to minimize the errors when predicting **points** using the predicted values as well as all remaining variables: the price of the bottle as well as the descriptors of the description obtained from our Natural Language Processing section.
 
 ```{r}
 
-glm_trained <- train(epsilon ~ price+Lenght+lexical_diversity+lexical_density+repetition+large_word_count+adjectives_count+noun_count+verb_count+good_words, method="glm", data = train_set )
+glm_trained <- train(points ~ predicted_ratings+ price+Lenght+lexical_diversity+lexical_density+repetition+large_word_count+adjectives_count+noun_count+verb_count+good_words, method="glm", data = train_set )
 
 ```
 
-Let's now test wether we can improve our results.
+Let's now test whether this improves our results.
 
 ```{r}
-glm_predicted_ratings <- predicted_ratings+predict(glm_trained,test_set)
+glm_predicted_ratings <- predict(glm_trained,test_set)
 
 glm_RMSE <- RMSE(glm_predicted_ratings, test_set$points) 
 
@@ -936,8 +1055,37 @@ kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set o
 
 ```
 
-Great! Our current RMSE is now `r paste(round(100*(naiveRMSE-glm_RMSE)/naiveRMSE,2),"%",sep="")` better than our "Just the average" RMSE.
-
 ##Results
 
+This method further brought down our RMSE to `r glm_RMSE`. That is a total improvement of `r paste(round(100*(naiveRMSE - glm_RMSE)/naiveRMSE,2),"%",sep="")` over our naive method of forecasting the average.
+
+What's more, we've also uncovered that the inclusion of price and the NLP variables improved the RMSE by `r paste(round(100*(country_taster_vintage_winery_variety_province_effect_RMSE - glm_RMSE)/country_taster_vintage_winery_variety_province_effect_RMSE,2),"%",sep="")`from the linear model.
+
+The importance of each variable can be illustrated as follows:
+
+```{r}
+varImp(glm_trained) %>% ggplot()
+```
+
+Unsurprisingly, price takes the first position, and the second position goes to our linear model predictions. Then, as we would have expected, the presence of words that are commonly associated with high ratings comes in third. The importance drops significantly after that.
+
+These results are encouraging. They mean that with a limited analysis of the descriptions, one can predict the rating that a wine would get within ~2 points, which is one full point better than just predicting the average of `r round(average_rating,2)`.
+
 ##Conclusion
+
+We started this paper by stating the motivation for this project: we love wine, and we rely on points systems to help us guide our buying. 
+
+By looking at the data, we've noticed that price was certainly a good indicater of how well a bottle would be rated. However, we had no way of establishing causality.
+
+We then dove into a linear model that took into consideration Country, Taster, Vintage, Winery, Variety and Province variables to predict the scores. We managed to improve our RMSE by `r paste(round(100*( naiveRMSE- country_taster_vintage_winery_variety_province_effect_RMSE)/naiveRMSE,2),"%",sep="")`. 
+
+Then, we trained a linear regression algorithm on the data and managed to further improve our RMSE by `r paste(round(100*(country_taster_vintage_winery_variety_province_effect_RMSE - glm_RMSE)/country_taster_vintage_winery_variety_province_effect_RMSE,2),"%",sep="")`, for a total of `r paste(round(100*(naiveRMSE - glm_RMSE)/naiveRMSE,2),"%",sep="")`.
+
+The most important variable in the regression was price, followed by our predicted values from our linear model, and finally by the presence of key words that are often associated with good wine.
+
+Here they are again, for your convenience: `r good_predictor_words`.
+
+To further improve the accuracy of this model, we would suggest two main paths:
+
+1. Experimenting with different features in the NLP of the descriptions
+2. Experimenting with different machine learning algorithms to determine whether some may perform better than linear regression. We have decided against it here for the sake of computing time.

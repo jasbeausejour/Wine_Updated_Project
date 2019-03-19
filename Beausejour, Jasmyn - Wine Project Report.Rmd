@@ -1,0 +1,556 @@
+---
+title: "Wine Ratings Project - Natural Language Processing"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+author: "Jas Beausejour"
+date: "March 19, 2019"
+---
+
+
+```{r, include=FALSE}
+start_time <- Sys.time()
+```
+
+Note 1: This report was created in the context of the HarvardX Professional Certificate in Data Science program available on edX. It was created solely for the purpose of this course by Jas Beausejour.
+
+Note 2: Running this code can easily take 9-11 minutes. The actual run time is indicated at the end of the report.
+
+##Executive Summary
+
+##Introduction
+
+In our daily life, we are fans of wine. From the old world to the new world, from the darkest of reds to the crispest of whites, we love tasting everything we can get our hands one. Even though we have our personal preferences for dark, full-bodied reds like Tempranillos from Rioja or Amarone della Valpolicella, we are always eager to try new wines.
+
+Wine, however, can be seen as a bet that one makes that one will like the bottle one just bought for $20. It is one of the very few products that has very little to tell us visually as long as it is in the bottle. And we make that bet every time we visit friends.
+
+Enter the points systems. World reknowned connoisseurs make a living off tasting wine and attributing it a rating from 0 to 100. Customers, in turn, look at these ratings to help them discover new bottles that they might enjoy. These ratings are often accompanied by detailed tasting notes written by the same connoisseurs.
+
+The motivation of this report is to use a data set that includes many wine tasting notes from various connoisseurs and use machine learning algorithm to try and predict what ratings would be assigned based on the tasting notes. This is important: points by and large can determine the value of a bottle. What's more, tasting notes can sometimes come out before the rating comes out, allowing one to get one's hands on an underpriced bottle of wine.
+
+The main goal of this report will be to create a machine learning model that minimizes the **Root Mean Square Error** of our predictions. The **RMSE** can be computed as follows:
+
+$$
+\mbox{RMSE} = \sqrt{\frac{1}{N} \sum_{u,i}^{} \left( \hat{y}_{u,i} - y_{u,i} \right)^2 }
+$$
+
+We define $y_{u,i}$ as the true rating for wine $i$ by rater $u$ and denote our prediction with $\hat{y}_{i,u}$. $N$ is the number of predictions we make in a dataset.
+
+Let us create a formula that automatically calculates the **RMSE**.
+
+```{r Creating RMSE Formula}
+RMSE <- function(true_ratings, predicted_ratings){
+    sqrt(mean((true_ratings - predicted_ratings)^2))
+  }
+```
+
+In this report, we will be using a dataset created by *zackthoutt* which can easily be downloaded from **Kaggle** at [this link]("https://www.kaggle.com/zynicide/wine-reviews"). To ensure that this code runs on a standalone basis, I include code that downloads the dataset into the user's temporary files from my GitHub repository.
+
+```{r Loading libraries, include=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+library(caret)
+
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr)
+
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+library(kableExtra)
+```
+
+This report will contain four main sections. 
+
+First, we will use the **Creating the Datasets** section as an opportunity to set up the various datasets that we will be using throughout this report. There will be 3 main datasets:
+
+
+1. **rating**: This contains all rows from the two sets above. This is the only set that will be created in this section. The other two will be created when we start our modelling exercise in the **Methods and Analysis** section.
+2. **testing_set**: This will be our final test set. We will not reference to it until we are ready to test our model and report our final RMSE, on which we will be graded. This will represent 10% of the  data. 
+3. **training_set**: This is the bulk of the data, on which we will be performing our analysis. It represents about 90% of the  data. We will act as thought this was this only data available, and train our models on this dataset.
+
+
+Second, in the **Methods and Analysis** section, we will describe the process we use to create our rating system, but we will first do a bit of exploratory data analysis to better understand the data set. We will then turn our attention to the modelling of the problem, which we will explain in detail in the hopes that the reader can easily follow our thoughts.
+
+Third, we will use the model created in the previous section to make predictions on the **testing_set** set. We will then proceed to calculate our final **RMSE**. This is the **Results** section.
+
+Fourth, our report will end on a **Conclusion**, where we suggest paths forward to further improve this algorithm.
+
+##Creating the Data Sets
+
+First off, we download the full dataset from our personal GitHub repo.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Now, I create a temporary file
+dl <- tempfile()
+
+# Here, we download the dataset in its raw format from my GitHub repository
+download.file("https://raw.githubusercontent.com/jasbeausejour/Wine_Updated_Project/master/Data/winemag-data-130k-v2.csv",dl)
+```
+We can now read the file into the R environment.
+
+```{r}
+ratings <- read.csv(dl,
+                      sep = ",",
+                      fill = TRUE)
+```
+
+Although we will need a training and a testing set, we wait until all our manipulations have occurred before creating them.
+
+##Methods and analysis
+
+####Exploratory Data Analysis and Visualization of non-NLP variables
+
+Before diving into the machine learning exercises, it is important to understand the data we are using. In this section, we will dive into the details of the data that is available to us.
+
+Let us now define our dataset.
+
+```{r}
+dim(ratings)
+```
+
+We have `r nrow(ratings)` observations with `r length(ratings)` variables. Each row represents a review that has been given by one of 19 tasters in the dataset.  Let's list these variables.
+
+```{r echo=FALSE}
+variables <- data_frame(Variables = colnames(ratings),
+                        Description = c("Row Identifier",
+                                        "Country of origin of the wine",
+                                        "The full text of the review written by the taster",
+                                        "The vineyard within the winery where the grapes that made the wine are from",
+                                        "The number of points WineEnthusiast rated the wine on a scale of 1-100 (though they say they only post reviews for wines that score >=80)",
+                                        "The cost for a bottle of the wine",
+                                        "The province or state that the wine is from",
+                                        "The wine growing area in a province or state (ie Napa)",
+                                        "Sometimes there are more specific regions specified within a wine growing area (ie Rutherford inside the Napa Valley), but this value can sometimes be blank",
+                                        "Name of the taster",
+                                        "Twitter Handle of the taster",
+                                        "The title of the wine review",
+                                        "The type of grapes used to make the wine (ie Pinot Noir)",
+                                        "The winery that made the wine"))
+
+variables %>% kable() %>% kable_styling(full_width = FALSE)
+```
+
+Let's now explore some of these variables.
+
+#####**Country**
+
+Let us now turn our attention to which countries are represented. 
+
+We can compute how many different countries are represented.
+```{r}
+length(unique(ratings$country))
+```
+
+
+We can make a bar plot showing the number of reviews by country like this (for the top 10).
+
+```{r}
+ratings %>% group_by(country) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% 
+  ggplot(aes(x=reorder(country,-n),y=n)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=n),nudge_y = 1800)+
+  labs(title="Reviews by country (top 10)", y="Number of reviews", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+We see that this is a very US-centric dataset, with about `r paste(round(100*length(which(ratings$country=="US"))/nrow(ratings)),"%",sep="")` of the reviews.
+
+We can also have a quick look at the distribution of scores by country. We notice that Austria and Germany have very high median scores and that Spain and Chile take the bottom two spots in the top 10 countries with most reviews. Additionally, in the top 10, we notice that only 5 countries have a review of 100 points: Australia, France, Italy, Portugal and the US.
+
+```{r}
+top_10_countries <- ratings %>% group_by(country) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% .$country
+
+ratings %>% filter(country %in% top_10_countries) %>% 
+  ggplot(aes(x=reorder(country,-points,FUN = median), y=points)) +
+  geom_boxplot()+
+  labs(title="Points distribution by country (top 10)", y="Points", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+#####**Points**
+
+As we are primarly interested about the points given to each wine, let us first examine the distribution of points.
+
+Let's first look at a few statistics:
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+ratings %>% select(points) %>% 
+  summarize(Min=min(points),
+            Max=max(points),
+            Average=round(mean(points),2),
+            Median=round(median(points),2),
+            "Standard Deviation"=round(sd(points),2)) %>% 
+  kable(caption = "Points Statistics", align = rep("c",5)) %>% 
+  kable_styling(full_width = FALSE)
+
+```
+We can get a better understanding of the distribution by looking at a histogram.
+
+```{r}
+ratings %>% select(points) %>% 
+  ggplot(aes(points)) +
+  geom_histogram(bins = 20)+
+  labs(title="Distribution of points", x="Points", y="Count")
+  
+```
+
+We can check if the data is normally distributed with this code:
+
+```{r}
+ratings %>% ggplot(aes(sample=points)) + 
+  geom_qq(dparams=summarize(ratings, mean=mean(points), sd=sd(points))) +
+  geom_abline() + labs(title="QQ-Plot for the Points Distribution", y="Actual", x="Theoretical")
+```
+
+We see from this plot that, although the data starts at 80 points and ends at 100 points, the normal distribution is a relatively good estimate between those two end points.
+
+
+#####**Price**
+
+Finally, let us look at the price variable, which is the only numerical variable we have at our disposal, thus far, to build our model. Let's look at a distribution.
+
+```{r}
+ratings %>% filter(price != "") %>% 
+  summarize(Min=min(price),
+            Max=max(price),
+            Average=round(mean(price),2),
+            Median=round(median(price),2),
+            "Standard Deviation"=round(sd(price),2)) %>% 
+  kable(caption = "Price Statistics", align = rep("c",5)) %>% 
+  kable_styling(full_width = FALSE)
+```
+
+
+We can build a histogram to get a better view.
+
+```{r}
+ratings %>% filter(price != "") %>% 
+  ggplot(aes(price)) +
+  geom_histogram(bins=25)+
+  scale_x_log10()+
+  labs(title="Distribution of reviews by bottle price", y="Count", x="Price per Bottle")
+```
+
+Now, the question on everyone's lip is whether there is a correlation between price and quality (points). Let's look at a scatterplot.
+
+```{r}
+ratings %>% filter(price !="") %>% 
+  ggplot(aes(x=price,y=points))+
+  geom_point()+
+  scale_x_log10()+
+  labs(title="Price distribution by points level", y="Points", x="Bottle Price (log10)")
+```
+
+We can see from this graph that there does seem to be a slight correlation, with most of the very low scores in the low-end of the price range. We also notice how, as we go up in points, we tend to shift to the right ot the price range. 
+
+To better understand this phenomenon, let's look at the average price at each point level.
+
+```{r}
+ratings %>% filter(price != "") %>% group_by(points) %>% 
+  summarise(`Average Price`=mean(price)) %>% 
+  ggplot(aes(x=points, y=`Average Price`)) + 
+  geom_bar(stat = "identity")+
+  geom_text(aes(label=round(`Average Price`)),nudge_y = 20)+
+  labs(title="Average Price Point per Points Level", x="Points")
+```
+
+Here, we clearly see that bottles over and above 90 points tend to be much more expensive. On average, bottles with 95+ points cost more than $100. Only very expensive bottles receive 100 points.
+
+
+#####**Province**
+
+Most of the time, however, knowing the country of a wine isn't sufficient to determine what to expect. For instance, a Côte-du-Rhone from France can be expected to taste very different from a Bordeaux or a Burgundy.
+
+Let us see which *provinces* are the most prevalent in our data.
+
+```{r}
+ratings %>% group_by(province) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% 
+  ggplot(aes(x=reorder(province,-n),y=n)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=n),nudge_y = 1800)+
+  labs(title="Reviews by Province (top 10)", y="Number of reviews", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Again, we notice how skewed our data is towards the US, with California in particular. Within California, we see Napa, Russian River Valley, Paso Robles and Sonoma have a very strong showing. Weirdly enough, "California" appear again in this variable.
+
+```{r}
+ratings %>% filter(province=="California") %>% 
+  group_by(region_1) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% 
+  ggplot(aes(x=reorder(region_1,-n),y=n)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=n),nudge_y = 300)+
+  labs(title="Reviews by Region (top 10 in California)", y="Number of reviews", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Back to the whole dataset, let's examine the score distribution by province for the top 10.
+
+```{r}
+top_10_province <- ratings %>% group_by(province) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% .$province
+
+ratings %>% filter(province %in% top_10_province) %>% 
+  ggplot(aes(x=reorder(province,-points,FUN = median), y=points)) +
+  geom_boxplot()+
+  labs(title="Points distribution by province (top 10)", y="Points", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+#####**Taster**
+
+The next variable we will examine is who exactly wrote the review. This information is held in the **taster_name** variable.
+
+There are `r length(unique(ratings$taster_name))` unique values in this variable, one of which is the absence of the rater's name. We will exclude those observations in the following analysis.
+
+Let us see who was most prolific.
+
+```{r}
+ratings %>% filter(taster_name != "") %>% group_by(taster_name) %>% summarize(n=n()) %>% 
+  ggplot(aes(x=reorder(taster_name,-n),y=n)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(label=n),nudge_y = 1800)+
+  labs(title="Reviews by Taster (all)", y="Number of reviews", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+We can appreciate that Roger Voss, Michael Schadner and Kerin O'Keefe have a very strong contribution to the dataset. Especially Mr. Voss... that is a lot of wine.
+
+Let us look now at a distribution of score by taster. We will only use the top 10 at this stage.
+
+```{r}
+top_10_taster <- ratings %>% filter(taster_name!="") %>% group_by(taster_name) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% .$taster_name
+
+ratings %>% filter(taster_name %in% top_10_taster) %>% 
+  ggplot(aes(x=reorder(taster_name,-points,FUN = median), y=points)) +
+  geom_boxplot()+
+  labs(title="Points distribution by variety (top 10)", y="Points", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+From this graph, we can see that some tasters tend to grade wines higher (like Matt Kettmann), and others more hasrshly (like Roger Voss and Michael Schachner).
+
+
+#####**Vintage**
+
+From the title of the review, we are often able to extract the vintage of the wine that was tasted. 
+
+For instance, wine 353 has this title: `r ratings[353,12]`. It is a wine from the vintage 2004.
+
+Let us try to do this systematically. This analysis will not be perfect, but wil give us a very good idea nevertheless.
+
+```{r}
+year_pattern <- "\\d\\d\\d\\d"
+ratings <- ratings %>% mutate(Vintage = as.numeric(str_extract(title,year_pattern)))
+
+# Remove anything that could be an error. We will assume that no wine in the dataset was made before 1910.
+ratings$Vintage <-  ifelse(ratings$Vintage>2018,"",ratings$Vintage)
+ratings$Vintage <-  ifelse(ratings$Vintage<1910,"",ratings$Vintage)
+
+# Create decades to make visualization easier
+
+ratings <- ratings %>% 
+  mutate(Decade =
+           ifelse(ratings$Vintage %in% 1900:1909, "1900s",
+           ifelse(ratings$Vintage %in% 1910:1919, "1910s",
+           ifelse(ratings$Vintage %in% 1920:1929, "1920s",
+           ifelse(ratings$Vintage %in% 1930:1939, "1930s",
+           ifelse(ratings$Vintage %in% 1940:1949, "1940s",
+           ifelse(ratings$Vintage %in% 1950:1959, "1950s",
+           ifelse(ratings$Vintage %in% 1960:1969, "1960s",
+           ifelse(ratings$Vintage %in% 1970:1979, "1970s",
+           ifelse(ratings$Vintage %in% 1980:1989, "1980s",
+           ifelse(ratings$Vintage %in% 1990:1999, "1990s",
+           ifelse(ratings$Vintage %in% 2000:2009, "2000s",
+           ifelse(ratings$Vintage %in% 2010:2019, "2010s",
+                  "")))))))))))))
+
+```
+
+The above code added two variables to our dataset: Vintage and Decade.
+
+Let's now look at this last variable:
+
+```{r}
+ratings %>% filter(Decade != "") %>% group_by(Decade) %>% 
+  summarise(Reviews = n(), `Average Score`=round(mean(points),2)) %>% 
+  kable(align = rep("c",3)) %>% 
+  kable_styling(full_width = FALSE)
+```
+
+Although earlier decades seem to display higher scores, this is likely due to the fact that there are only a few reviews for these years, of very good bottles.
+
+For curiosity, let's look at the average score for the region of Bordeaux for the years 2005+. For anyone with wine knowledge, the results won't be surprising: 2009, 2008 and 2010 are very high on the list. I must say that 2015 being second to last is unexpected however.
+
+```{r}
+ratings %>% filter(Vintage>2005 & province=="Bordeaux") %>% 
+  group_by(Vintage) %>% 
+  summarize("Average Score"=round(mean(points),2), Reviews = n()) %>% 
+  arrange(-`Average Score`) %>% 
+  kable(align = rep("c",3)) %>% 
+  kable_styling(full_width = F)
+```
+
+
+#####**Variety**
+
+Let us now turn our attention to which countries are represented. 
+
+We can compute how many different grape varietals are represented.
+```{r}
+length(unique(ratings$variety))
+```
+
+To the untrained eye, 708 may seem like a lot, but let us remember that there are approximately 10,000 grape varietals in the world. Of course, not all of them are frequently found in wine. Let's look at the top 12 varieties.
+
+```{r}
+ratings %>% 
+  group_by(variety) %>% 
+  summarize(Reviews=n()) %>% 
+  top_n(12,Reviews) %>% 
+  arrange(desc(Reviews)) %>%
+  select(Variety=variety,Reviews=Reviews) %>% 
+  kable(align = rep("c",2)) %>% 
+  kable_styling(full_width = FALSE)
+```
+
+We notice that the most common variety are Pinot Noir, Chardonnay and Cabernet Sauvignon. This is not surprising as those grapes are very common in the US. We then see "Red Blend" and "Bordeaux-style Red Blend". The former is a bit dissapointing as Red Blend could litteraly mean anything. Let's see where those wines come from:
+
+```{r}
+ratings %>% filter(variety=="Red Blend") %>% 
+  group_by(country) %>% 
+  summarize(Reviews =n()) %>%
+  select(Country=country,Reviews=Reviews) %>% 
+  top_n(5,Reviews) %>% 
+  arrange(desc(Reviews)) %>% 
+  kable(align = rep("c",2)) %>% 
+  kable_styling(full_width = FALSE)
+```
+
+We are a bit surprised that Italy would have so many "Red Blends" since there are many *appelations* that would have made the data more specific. However, we are not surprised to see the US high on this list given the flexibility of winemaking regulations in the country.
+
+For wines of the old world, France for instance, we expect to see specific blends. For instance, all wines in Bordeaux would have some concentration of Cabernet Sauvignon, Cabernet Franc and Merlot, and perhaps a bit of Petit Verdot. Let's see.
+
+```{r}
+ratings %>% filter(province=="Bordeaux") %>% 
+  group_by(variety) %>% 
+  summarize(Reviews=n()) %>% 
+  select(Variety=variety,Reviews) %>% 
+  top_n(5,Reviews) %>% 
+  arrange(desc(Reviews)) %>% 
+  kable(align = rep("c",2)) %>% 
+  kable_styling(full_width = FALSE)
+```
+Our intuition is confirmed.
+
+Let us now look at the top 10 varieties and their score distribution.
+
+```{r}
+top_10_varieties <- ratings %>% group_by(variety) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% .$variety
+
+ratings %>% filter(variety %in% top_10_varieties) %>% 
+  ggplot(aes(x=reorder(variety,-points,FUN = median), y=points)) +
+  geom_boxplot()+
+  labs(title="Points distribution by variety (top 10)", y="Points", x="")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+#####**Winery**
+
+We know that some wineries have a very strong reputation and tend to systematically attract more points. Let us look at the distribution of the average score by winery.
+
+```{r}
+ratings %>% group_by(winery) %>% summarize(Avg=mean(points)) %>%
+  ggplot(aes(Avg)) +
+  geom_histogram(bins=25)+
+  labs(title="Distribution of wineries by average score", y="Wineries", x="Average Score")
+```
+
+Of course, it is possible that some of the extreme cases here are wineries that are only seldom reviewed. The average number of review per winery is:
+
+```{r}
+ratings %>% group_by(winery) %>% summarise(n=n()) %>% ungroup() %>% summarise(Average=mean(n)) %>% .$Average
+```
+
+
+At this point, it is worth looking at the wineries with an average score above 95 points, with at least 10 reviews. That's an impressive showing.
+
+```{r}
+ratings %>% group_by(winery) %>% 
+  summarise(Avg=mean(points),Reviews=n(), Price = round(mean(price),2)) %>% 
+  filter(Avg>95 & Reviews>=8) %>% arrange(-Avg) %>% 
+  select(Winery=winery, `Average Score`=Avg, Reviews = Reviews, `Average Bottle Price`=Price) %>% 
+  kable(align = rep("c",3)) %>% 
+  kable_styling(full_width = F)
+```
+
+```{r Cleanup, include=FALSE}
+rm(top_10_countries,top_10_province,top_10_taster,top_10_varieties, year_pattern)
+```
+
+####NLP on the Description Variable
+
+In the following section, we will dive into the content of the **description** variable, which contains the text of the review written by the tasters. We will use tecniques of text mining and natural language processing inspired by the tutorial posted by Debbie Liske at [this link](https://www.datacamp.com/community/tutorials/R-nlp-machine-learning).
+
+We now create a quick function to get rid of English contractions
+
+```{r}
+fix.contractions <- function(doc) {
+  # "won't" is a special case as it does not expand to "wo not"
+  doc <- gsub("won't", "will not", doc)
+  doc <- gsub("can't", "can not", doc)
+  doc <- gsub("n't", " not", doc)
+  doc <- gsub("'ll", " will", doc)
+  doc <- gsub("'re", " are", doc)
+  doc <- gsub("'ve", " have", doc)
+  doc <- gsub("'m", " am", doc)
+  doc <- gsub("'d", " would", doc)
+  # 's could be 'is' or could be possessive: it has no expansion
+  doc <- gsub("'s", "", doc)
+  return(doc)
+}
+```
+Let's apply it, and convert everything to lower case.
+
+```{r}
+ratings$description <- sapply(ratings$description,fix.contractions)
+ratings$description <- tolower(ratings$description)
+```
+
+Let us now create a data frame in a tidy format, where each word has a row. We use the **udpipe** package to also lemmatize each word (e.g., aromas = aroma) and get its Part of Speech (e.g.,  adjective, noun, etc.). I anti-join the dataset *stop_words* to get rid of overly common words like "where", "has", "yet", etc. Finally, I only keep words with 3 characters or more, since most small words do not reveal that much meaning.
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+ud_model <- udpipe_download_model(language = "english")
+ud_model <- udpipe_load_model(ud_model$file_model)
+
+#this will take a while!
+
+words_in_descriptions <- as.data.frame(udpipe_annotate(ud_model, 
+                                   x = ratings$description, 
+                                   doc_id = ratings$X)) %>% 
+  rename(word="token") %>% 
+  anti_join(stop_words) %>% 
+  filter(nchar(word)>=3 & upos != "PUNCT")
+```
+
+For the sake of speeding things up in the future, I save a copy of this data frame, which I will upload onto my GitHub repo.
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+save(words_in_descriptions, file = "words_in_descriptions.rda")
+```
+
+Because of how long the above step takes, I've decided to save a copy of that data frame to my GitHub repository. I've deactivated the above code and instead am downloading the file here.
+
+```{r}
+githubURL <- url("https://github.com/jasbeausejour/Wine_Project/blob/master/words_in_description.rda?raw=true")
+print(load(githubURL))
+```
+
+##Results
+
+##Conclusion

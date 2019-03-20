@@ -17,11 +17,13 @@ Note 1: This report was created in the context of the HarvardX Professional Cert
 
 Note 2: Running this code can easily take 3-5 minutes. The actual run time is indicated at the end of the report.
 
+Note 3: This code requires internet connection.
+
 ##Executive Summary
 
-In this report, we will show that when asked to predict the score given to a wine bottle by a connoiseur (on 100), a simple guess of **88.42** would yield a Root Mean Square Error of around 3.06.
+In this report, we will show that when asked to predict the score given to a wine bottle by a connoiseur (on 100), a simple guess of **88.42** would yield a Root Mean Square Error of around 3.06. Given the range of scores given in the dataset is 80-100, a RMSE of 3.06 is already pretty good. However, we show that we can improve this performance by a combination of the techniques used in the MovieLens project and machine learning.
 
-We will further show that with the knowledge of the country of origin, the identity of the connoisseur, the vintage of the bottle, the winery that produced the wine, the variety of grape, and the province of origin, one would be able to reduce one's RMSE by about 23%.
+We will show that with the knowledge of the country of origin, the identity of the connoisseur, the vintage of the bottle, the winery that produced the wine, the variety of grape, and the province of origin, one would be able to reduce one's RMSE by about 23%.
 
 We then show that the layering of a simple linear regression model that takes into account the previous predictions, the price of the bottle and a few characteristics of the description given by the connoisseur (obtained through Natural Language Processing) can further improve RMSE by roughly 12%.
 

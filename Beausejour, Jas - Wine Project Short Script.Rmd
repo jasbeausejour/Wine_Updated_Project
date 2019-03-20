@@ -1,0 +1,353 @@
+---
+title: "Beausejour, Jas - Wine Project Short Script"
+author: "Jas Beausejour"
+date: "March 20, 2019"
+output: html_document
+---
+This document is meant to be a supplement to the main report Beausejour, Jas - Wine Project Report.Rmd.
+
+It is a shorter version of the code, with much less nuance, aimed at quickly estimating the values and getting to our final RMSE.
+
+In a way, this can be tought of as the piece of code that would be implemented in a real-life scenario.
+
+Before anything, we load a few libraries.
+
+```{r Loading libraries, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+library(caret)
+
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr)
+
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+library(kableExtra)
+
+if(!require(udpipe)) install.packages("udpipe", repos = "http://cran.us.r-project.org")
+library(udpipe)
+
+if(!require(igraph)) install.packages("igraph", repos = "http://cran.us.r-project.org")
+library(igraph)
+
+if(!require(ggraph)) install.packages("ggraph", repos = "http://cran.us.r-project.org")
+library(ggraph)
+```
+
+**Step 1: Generating the datasets**
+
+First off, we download the full dataset from our personal [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project).
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Now, I create a temporary file
+dl <- tempfile()
+
+# Here, we download the dataset in its raw format from my GitHub repository
+download.file("https://raw.githubusercontent.com/jasbeausejour/Wine_Updated_Project/master/Data/winemag-data-130k-v2.csv",dl)
+```
+We can now read the file into the R environment.
+
+```{r}
+ratings <- read.csv(dl,
+                      sep = ",",
+                      fill = TRUE)
+```
+
+**Step 2: Extract Vintage from Titles**
+
+In the code below, we extract vintage year information from the title of the reviews.
+
+From the title of the review, we are often able to extract the vintage of the wine that was tasted. 
+
+For instance, wine 353 has this title: `r ratings[353,12]`. It is a wine from the vintage 2004.
+
+Let us try to do this systematically. This analysis will not be perfect, but wil give us a very good idea nevertheless.
+
+```{r}
+year_pattern <- "\\d\\d\\d\\d"
+ratings <- ratings %>% mutate(Vintage = as.numeric(str_extract(title,year_pattern)))
+
+# Remove anything that could be an error. We will assume that no wine in the dataset was made before 1910.
+ratings$Vintage <-  ifelse(ratings$Vintage>2018,"",ratings$Vintage)
+ratings$Vintage <-  ifelse(ratings$Vintage<1910,"",ratings$Vintage)
+```
+
+**Step 3: Extract information from the descritions**
+
+Because the steps of natural language processing take a very long time, I've written, but deactivated the code below. I then download the resulting dataset from my personal repository.
+
+We now create a quick function to get rid of English contractions
+
+```{r}
+fix.contractions <- function(doc) {
+  # "won't" is a special case as it does not expand to "wo not"
+  doc <- gsub("won't", "will not", doc)
+  doc <- gsub("can't", "can not", doc)
+  doc <- gsub("n't", " not", doc)
+  doc <- gsub("'ll", " will", doc)
+  doc <- gsub("'re", " are", doc)
+  doc <- gsub("'ve", " have", doc)
+  doc <- gsub("'m", " am", doc)
+  doc <- gsub("'d", " would", doc)
+  # 's could be 'is' or could be possessive: it has no expansion
+  doc <- gsub("'s", "", doc)
+  return(doc)
+}
+```
+Let's apply it, and convert everything to lower case.
+
+```{r}
+ratings$description <- sapply(ratings$description,fix.contractions)
+ratings$description <- tolower(ratings$description)
+```
+
+Let us now create a data frame in a tidy format, where each word has a row. We use the **udpipe** package to also lemmatize each word (e.g., aromas = aroma) and get its Part of Speech (e.g.,  adjective, noun, etc.). I anti-join the dataset *stop_words* to get rid of overly common words like "where", "has", "yet", etc. Finally, I only keep words with 3 characters or more, since most small words do not reveal that much meaning.
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+ud_model <- udpipe_download_model(language = "english")
+ud_model <- udpipe_load_model(ud_model$file_model)
+
+#this will take a while!
+
+words_in_descriptions <- as.data.frame(udpipe_annotate(ud_model, 
+                                   x = ratings$description, 
+                                   doc_id = ratings$X)) %>% 
+  rename(word="token") %>% 
+  anti_join(stop_words) %>% 
+  filter(nchar(word)>=3 & upos != "PUNCT")
+```
+
+For the sake of speeding things up in the future, I save a copy of this data frame, which I will upload onto my [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project).
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+save(words_in_descriptions, file = "words_in_descriptions.rda")
+```
+
+Because of how long the above step takes, I've decided to save a copy of that data frame to my [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project). I've deactivated the above code and instead am downloading the file here.
+
+```{r}
+githubURL <- url("https://github.com/jasbeausejour/Wine_Updated_Project/blob/master/Data/words_in_description.rda?raw=true")
+print(load(githubURL))
+```
+
+Next, we extract the "key words" that tend to be indicators of a good bottle. These are the top 50 words found in descriptions of wine with 95+ points, anti-joined on the top 50 words found in descriptions of wine with less than 95 points.
+
+```{r}
+words_in_descriptions <- words_in_descriptions %>% mutate(X=as.integer(doc_id)) %>% 
+  left_join(ratings, by = "X") %>% select(X,word,lemma,upos,points,price)
+
+top_50_good <- words_in_descriptions %>% filter(points>=95) %>% group_by(lemma) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  top_n(50,Count) 
+
+top_50_lessthangood <- words_in_descriptions %>% filter(points<95) %>% group_by(lemma) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  top_n(50,Count) 
+
+good_predictor_words <- top_50_good %>% anti_join(top_50_lessthangood, by="lemma") %>% .$lemma
+
+print(good_predictor_words)
+```
+Let us now create some more descriptors that relate to each descriptions, and add those to our **ratings** dataset. This is called "feature engineering".
+
+We add: lenght of descrition in words, the lexical diversity (distinct words), lexical density (diversity as % of total words), repetition (Length/diversity), number of large words with 8 or more characters, number of adjectives, number of nouns, number of verbs and, most importantly, number of words that are in the list of words typically associated with very good bottles as defined above.
+
+```{r}
+descriptors <- words_in_descriptions %>% group_by(X) %>% 
+  summarise(Length = n(),
+            lexical_diversity = n_distinct(word),
+            lexical_density = lexical_diversity/Length,
+            repetition = Length/lexical_diversity,
+            large_word_count = sum(ifelse((nchar(word) > 7), 1, 0)),
+            adjectives_count = sum(ifelse(upos == "ADJ",1,0)),
+            noun_count = sum(ifelse(upos == "NOUN",1,0)),
+            verb_count = sum(ifelse(upos == "VERB",1,0)),
+            good_words = sum(ifelse(lemma %in% good_predictor_words,1,0)))
+  
+```
+
+We now add these descriptors to the **ratings** dataframe.
+
+```{r}
+#Adding the descriptors
+ratings <- ratings %>% left_join(descriptors,by = "X")
+
+#Cleaning the environment
+rm(descriptors, words_in_descriptions)
+
+#Selecting only the variables which we intend to use in our analysis and creating a ratings set for machine learning purposes
+
+ratings_ML <- ratings %>% 
+  select(X,
+         country,
+         price,
+         province,
+         taster_name,
+         variety,
+         winery,
+         Vintage,
+         Lenght=Length,
+         lexical_diversity,
+         lexical_density,
+         repetition,
+         large_word_count,
+         adjectives_count,
+         noun_count,
+         verb_count,
+         good_words,
+         points)
+
+#Removing bottles for which price is not available
+
+NAs <- which(is.na(ratings_ML$price))
+ratings_ML <- ratings_ML[-NAs,]
+```
+
+**Step 4: Create training and testing sets**
+
+We are now ready to use our data for Machine Learning purposes. We will begin by splitting our **ratings_ML** dataset into a **train_set** and a **test_set**.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Test set will be 10% of Ratings_ML data
+
+set.seed(1)
+test_index <- createDataPartition(y = ratings_ML$points, times = 1, p = 0.10, list = FALSE)
+train_set <- ratings_ML[-test_index,]
+temp_set <- ratings_ML[test_index,]
+
+# Make sure country, province, taster_name, variety, winery and vintage are also in the training set
+
+test_set <- temp_set %>% 
+      semi_join(train_set, by = "country") %>%
+      semi_join(train_set, by = "province") %>%
+      semi_join(train_set, by = "taster_name") %>%
+      semi_join(train_set, by = "variety") %>%
+      semi_join(train_set, by = "winery") %>%
+      semi_join(train_set, by = "Vintage")
+
+# Add rows removed from test set set back into train set
+
+removed_rows <- anti_join(temp_set, test_set)
+train_set <- rbind(train_set, removed_rows)
+
+rm(removed_rows, temp_set, test_index)
+```
+
+**Step 5: Calculating the various effects**
+
+In th below code, we skip the explanations entirely. Please refer to the report for the nuances.
+
+We aim at calculating the country, taster, vintage, winery, variety, and province effects in an efficient manner here.
+
+```{r}
+average_rating <- mean(train_set$points)
+
+country_avgs <- train_set %>% 
+  group_by(country) %>% 
+  summarize(country_effect = mean(points - average_rating))
+
+taster_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  group_by(taster_name) %>%
+  summarize(taster_effect = mean(points - average_rating - country_effect))
+
+vintage_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>% 
+  group_by(Vintage) %>%
+  summarize(vintage_effect = mean(points - average_rating - country_effect - taster_effect))
+
+winery_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>% 
+  group_by(winery) %>%
+  summarize(winery_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect))
+
+variety_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>%
+  left_join(winery_avgs, by = 'winery') %>% 
+  group_by(variety) %>%
+  summarize(variety_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect - winery_effect))
+
+province_avgs <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by = "taster_name") %>%
+  left_join(vintage_avgs, by = "Vintage") %>%
+  left_join(winery_avgs, by = 'winery') %>% 
+  left_join(variety_avgs,by='variety') %>% 
+  group_by(province) %>%
+  summarize(province_effect = mean(points - average_rating - country_effect - taster_effect - vintage_effect - winery_effect - variety_effect))
+```
+
+**Step 6: Creating the predictions for both the training and testing set, setting up for machine learning**
+
+Below, we create a set of predictions from this "linear model". We add that prediction as a variable into our training and testing set, because we will use it in our machine learning process.
+
+```{r}
+# Create predictions for the test set
+predicted_ratings <- test_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  left_join(winery_avgs,by='winery') %>%
+  left_join(variety_avgs,by='variety') %>%
+  left_join(province_avgs,by="province") %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect+winery_effect+variety_effect+province_effect) %>%
+  .$pred
+
+# Create predictions for the training set
+predicted_ratings_train <- train_set %>% 
+  left_join(country_avgs, by='country') %>%
+  left_join(taster_avgs, by='taster_name') %>%
+  left_join(vintage_avgs, by = 'Vintage') %>% 
+  mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect) %>%
+  .$pred
+
+#Add predicted values to both sets
+train_set <- train_set %>% mutate(predicted_ratings = predicted_ratings_train,
+                                  epsilon = points - predicted_ratings_train)
+test_set <- test_set %>% mutate(predicted_ratings=predicted_ratings,
+                                epsilon = points - predicted_ratings)
+```
+
+**Step 7: Train the linear regression**
+
+Now, we train the linear regression model on the remaining variable.
+
+```{r}
+#Train the model
+glm_trained <- train(points ~ predicted_ratings+ price+Lenght+lexical_diversity+lexical_density+repetition+large_word_count+adjectives_count+noun_count+verb_count+good_words, method="glm", data = train_set )
+```
+
+**Step 8: Making final predictions and calculating RMSE**
+
+Here, we use the model to make final predictions and calculate the RMSE on the test set.
+
+We start by creating our RMSE formula.
+
+```{r Creating RMSE Formula}
+RMSE <- function(true_ratings, predicted_ratings){
+    sqrt(mean((true_ratings - predicted_ratings)^2))
+  }
+```
+
+We then make the predictions.
+
+```{r}
+glm_predicted_ratings <- predict(glm_trained,test_set)
+```
+
+We calculate the RMSE.
+
+```{r}
+finalRMSE <- RMSE(test_set$points,glm_predicted_ratings)
+
+finalRMSE
+```
+This RMSE of 2.062728 is the same that we got in our full report, and it is an improvement of 32.27% over naively guessing the average score.

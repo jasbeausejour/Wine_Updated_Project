@@ -15,7 +15,7 @@ start_time <- Sys.time()
 
 Note 1: This report was created in the context of the HarvardX Professional Certificate in Data Science program available on edX. It was created solely for the purpose of this course by Jas Beausejour.
 
-Note 2: Running this code can easily take 9-11 minutes. The actual run time is indicated at the end of the report.
+Note 2: Running this code can easily take 3-5 minutes. The actual run time is indicated at the end of the report.
 
 ##Executive Summary
 
@@ -23,27 +23,29 @@ In this report, we will show that when asked to predict the score given to a win
 
 We will further show that with the knowledge of the country of origin, the identity of the connoisseur, the vintage of the bottle, the winery that produced the wine, the variety of grape, and the province of origin, one would be able to reduce one's RMSE by about 23%.
 
-We then show that the layering of a simple linear regression model that takes into account the previous predictions, the price of the bottle and a few characteristics of the description given by the connoisseur can further improve RMSE by roughly 12%.
+We then show that the layering of a simple linear regression model that takes into account the previous predictions, the price of the bottle and a few characteristics of the description given by the connoisseur (obtained through Natural Language Processing) can further improve RMSE by roughly 12%.
 
-In that linear regression, we show that the most important variables are 
+In that linear regression, we show that the most important variables are price, the results from the predictions using the categorical variables discussed previously and finally a list of words that are commonly associated with great scores that are present in the descriptions: **age, vineyard, complex, vintage, firm, dense, chocolate, power, delicious, powerful, time, richness, fine, currant, mineral, intense, layer.**
+
+We believe the performance of the model could be further improved by digging deeper into natural language processing of the descriptions as well as experimenting with other machine learning algorithms, which we decided not to do to based on computing constraints.
 
 ##Introduction
 
-In our daily life, we are fans of wine. From the old world to the new world, from the darkest of reds to the crispest of whites, we love tasting everything we can get our hands one. Even though we have our personal preferences for dark, full-bodied reds like Tempranillos from Rioja or Amarone della Valpolicella, we are always eager to try new wines.
+In our daily life, we are fans of wine. From the old world to the new world, from the darkest of reds to the crispest of whites, we love tasting everything we can get our hands on. Even though we have our personal preferences for dark, full-bodied reds like Tempranillos from Rioja or Amarone della Valpolicella, we are always eager to try new wines.
 
-Wine, however, can be seen as a bet that one makes that one will like the bottle one just bought for $20. It is one of the very few products that has very little to tell us visually as long as it is in the bottle. And we make that bet every time we visit friends.
+Wine, however, can be seen as a bet that one makes that one will like the bottle one just bought for $20. It is one of the very few products that has very little to tell us visually as long as it is in the bottle. And we make that bet every time we visit friends or buy a bottle for ourselves.
 
 Enter the points systems. World reknowned connoisseurs make a living off tasting wine and attributing it a rating from 0 to 100. Customers, in turn, look at these ratings to help them discover new bottles that they might enjoy. These ratings are often accompanied by detailed tasting notes written by the same connoisseurs.
 
-The motivation of this report is to use a data set that includes many wine tasting notes from various connoisseurs and use machine learning algorithm to try and predict what ratings would be assigned based on the tasting notes. This is important: points by and large can determine the value of a bottle. What's more, tasting notes can sometimes come out before the rating comes out, allowing one to get one's hands on an underpriced bottle of wine.
+The motivation of this report is to use a data set that includes many wine tasting notes from various connoisseurs and use machine learning algorithm to try and predict what ratings would be assigned based on the tasting notes and a few other variables. This is important: points by and large can determine the value of a bottle. What's more, tasting notes can sometimes come out before the rating comes out, allowing one to get one's hands on an underpriced bottle of wine.
 
 The main goal of this report will be to create a machine learning model that minimizes the **Root Mean Square Error** of our predictions. The **RMSE** can be computed as follows:
 
 $$
-\mbox{RMSE} = \sqrt{\frac{1}{N} \sum_{u,i}^{} \left( \hat{y}_{u,i} - y_{u,i} \right)^2 }
+\mbox{RMSE} = \sqrt{\frac{1}{N} \sum_{c,t,v,w,va,p}^{} \left( \hat{y}_{c,t,v,w,va,p} - y_{c,t,v,w,va,p} \right)^2 }
 $$
 
-We define $y_{u,i}$ as the true rating for wine $i$ by rater $u$ and denote our prediction with $\hat{y}_{i,u}$. $N$ is the number of predictions we make in a dataset.
+We define $y_{c,t,v,w,va,p}$ as the true rating for country $c$, by taster $t$, of vintage $v$, from grape variety $va$ produced in province $p$, and denote our prediction with $\hat{y}_{c,t,v,w,va,p}$. $N$ is the number of predictions we make in a dataset.
 
 Let us create a formula that automatically calculates the **RMSE**.
 
@@ -53,7 +55,7 @@ RMSE <- function(true_ratings, predicted_ratings){
   }
 ```
 
-In this report, we will be using a dataset created by *zackthoutt* which can easily be downloaded from **Kaggle** at [this link]("https://www.kaggle.com/zynicide/wine-reviews"). To ensure that this code runs on a standalone basis, I include code that downloads the dataset into the user's temporary files from my GitHub repository.
+In this report, we will be using a dataset created by *zackthoutt* which can easily be downloaded from **Kaggle** at [this link](https://www.kaggle.com/zynicide/wine-reviews). To ensure that this code runs on a standalone basis, I include code that downloads the dataset into the user's temporary files from my [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project).
 
 ```{r Loading libraries, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
@@ -83,9 +85,9 @@ This report will contain four main sections.
 First, we will use the **Creating the Datasets** section as an opportunity to set up the various datasets that we will be using throughout this report. There will be 3 main datasets:
 
 
-1. **rating**: This contains all rows from the two sets above. This is the only set that will be created in this section. The other two will be created when we start our modelling exercise in the **Methods and Analysis** section.
-2. **testing_set**: This will be our final test set. We will not reference to it until we are ready to test our model and report our final RMSE, on which we will be graded. This will represent 10% of the  data. 
-3. **training_set**: This is the bulk of the data, on which we will be performing our analysis. It represents about 90% of the  data. We will act as thought this was this only data available, and train our models on this dataset.
+1. **rating**: This contains all rows from the two sets below. This is the only set that will be created in this section. The other two will be created when we start our modelling exercise in the **Methods and Analysis** section.
+2. **test_set**: This will be our final test set. We will not reference to it until we are ready to test our model and report our final RMSE, on which we will be graded. This will represent 10% of the  data. 
+3. **train_set**: This is the bulk of the data, on which we will be performing our analysis. It represents about 90% of the  data. We will act as thought this was this only data available, and train our models on this dataset.
 
 
 Second, in the **Methods and Analysis** section, we will describe the process we use to create our rating system, but we will first do a bit of exploratory data analysis to better understand the data set. We will then turn our attention to the modelling of the problem, which we will explain in detail in the hopes that the reader can easily follow our thoughts.
@@ -96,7 +98,7 @@ Fourth, our report will end on a **Conclusion**, where we suggest paths forward 
 
 ##Creating the Data Sets
 
-First off, we download the full dataset from our personal GitHub repo.
+First off, we download the full dataset from our personal [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project).
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 # Now, I create a temporary file
@@ -115,7 +117,7 @@ ratings <- read.csv(dl,
 
 Although we will need a training and a testing set, we wait until all our manipulations have occurred before creating them.
 
-##Methods and analysis
+##Methods and Analysis
 
 ####Exploratory Data Analysis and Visualization of non-NLP variables
 
@@ -127,7 +129,7 @@ Let us now define our dataset.
 dim(ratings)
 ```
 
-We have `r nrow(ratings)` observations with `r length(ratings)` variables. Each row represents a review that has been given by one of 19 tasters in the dataset.  Let's list these variables.
+We have 120,971 observations with 14 variables. Each row represents a review that has been given by one of 19 tasters in the dataset.  Let's list these variables.
 
 ```{r echo=FALSE}
 variables <- data_frame(Variables = colnames(ratings),
@@ -151,7 +153,7 @@ variables %>% kable() %>% kable_styling(full_width = FALSE)
 
 Let's now explore some of these variables.
 
-#####**Country**
+#####Country
 
 Let us now turn our attention to which countries are represented. 
 
@@ -163,7 +165,7 @@ length(unique(ratings$country))
 
 We can make a bar plot showing the number of reviews by country like this (for the top 10).
 
-```{r}
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 ratings %>% group_by(country) %>% summarize(n=n()) %>% top_n(10,wt=n) %>% 
   ggplot(aes(x=reorder(country,-n),y=n)) +
   geom_bar(stat="identity")+
@@ -187,9 +189,9 @@ ratings %>% filter(country %in% top_10_countries) %>%
 
 
 
-#####**Points**
+#####Points
 
-As we are primarly interested about the points given to each wine, let us first examine the distribution of points.
+As we are primarly interested about the points given to each wine, let us now examine the distribution of points.
 
 Let's first look at a few statistics:
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -225,9 +227,9 @@ ratings %>% ggplot(aes(sample=points)) +
 We see from this plot that, although the data starts at 80 points and ends at 100 points, the normal distribution is a relatively good estimate between those two end points.
 
 
-#####**Price**
+#####Price
 
-Finally, let us look at the price variable, which is the only numerical variable we have at our disposal, thus far, to build our model. Let's look at a distribution.
+Let us now look at the price variable, which is the only numerical variable we have at our disposal, thus far, to build our model. Let's look at a distribution.
 
 ```{r}
 ratings %>% filter(price != "") %>% 
@@ -277,9 +279,9 @@ ratings %>% filter(price != "") %>% group_by(points) %>%
 Here, we clearly see that bottles over and above 90 points tend to be much more expensive. On average, bottles with 95+ points cost more than $100. Only very expensive bottles receive 100 points.
 
 
-#####**Province**
+#####Province
 
-Most of the time, however, knowing the country of a wine isn't sufficient to determine what to expect. For instance, a Côte-du-Rhone from France can be expected to taste very different from a Bordeaux or a Burgundy.
+Most of the time, however, knowing the country and price of a wine isn't sufficient to determine what to expect. For instance, a Côte-du-Rhone from France can be expected to taste very different from a Bordeaux or a Burgundy, and therefore affect the ratings..
 
 Let us see which *provinces* are the most prevalent in our data.
 
@@ -318,7 +320,7 @@ ratings %>% filter(province %in% top_10_province) %>%
 
 
 
-#####**Taster**
+#####Taster
 
 The next variable we will examine is who exactly wrote the review. This information is held in the **taster_name** variable.
 
@@ -352,7 +354,7 @@ ratings %>% filter(taster_name %in% top_10_taster) %>%
 From this graph, we can see that some tasters tend to grade wines higher (like Matt Kettmann), and others more hasrshly (like Roger Voss and Michael Schachner).
 
 
-#####**Vintage**
+#####Vintage
 
 From the title of the review, we are often able to extract the vintage of the wine that was tasted. 
 
@@ -413,9 +415,9 @@ ratings %>% filter(Vintage>2005 & province=="Bordeaux") %>%
 ```
 
 
-#####**Variety**
+#####Variety
 
-Let us now turn our attention to which countries are represented. 
+Let us now turn our attention to which grape varietals are represented. 
 
 We can compute how many different grape varietals are represented.
 ```{r}
@@ -477,7 +479,7 @@ ratings %>% filter(variety %in% top_10_varieties) %>%
 ```
 
 
-#####**Winery**
+#####Winery
 
 We know that some wineries have a very strong reputation and tend to systematically attract more points. Let us look at the distribution of the average score by winery.
 
@@ -495,7 +497,7 @@ ratings %>% group_by(winery) %>% summarise(n=n()) %>% ungroup() %>% summarise(Av
 ```
 
 
-At this point, it is worth looking at the wineries with an average score above 95 points, with at least 10 reviews. That's an impressive showing.
+At this point, it is worth looking at the wineries with an average score above 95 points, with at least 10 reviews. That's an impressive showing, and we wouldn't hesitate to get our hands on a bottle from Tenuta dell'Ornellaia if we could buy one. Here is [their website](http://www.ornellaia.com/en/), for anyone interested.
 
 ```{r}
 ratings %>% group_by(winery) %>% 
@@ -555,13 +557,13 @@ words_in_descriptions <- as.data.frame(udpipe_annotate(ud_model,
   filter(nchar(word)>=3 & upos != "PUNCT")
 ```
 
-For the sake of speeding things up in the future, I save a copy of this data frame, which I will upload onto my GitHub repo.
+For the sake of speeding things up in the future, I save a copy of this data frame, which I will upload onto my [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project).
 
 ```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 save(words_in_descriptions, file = "words_in_descriptions.rda")
 ```
 
-Because of how long the above step takes, I've decided to save a copy of that data frame to my GitHub repository. I've deactivated the above code and instead am downloading the file here.
+Because of how long the above step takes, I've decided to save a copy of that data frame to my [Github repository](https://github.com/jasbeausejour/EDX_Updated_Movie_Project). I've deactivated the above code and instead am downloading the file here.
 
 ```{r}
 githubURL <- url("https://github.com/jasbeausejour/Wine_Updated_Project/blob/master/Data/words_in_description.rda?raw=true")
@@ -627,7 +629,7 @@ ggraph(wordnetwork, layout = "fr") +
 
 From the above, we can clearly see that it is very common for a wine to have cherry flavor or/and black fruit flavor. Other words that are often associated with flavor are: spice, finish (as in the wine's finish), palate, ripe, acidity and tannins.
 
-Let's see which words are within the top 50 most common for bottles scoring 95+, but not within the top 50 for bottles scoring lower
+Let's see which words are within the top 50 most common for bottles scoring 95+, but not within the top 50 for bottles scoring lower. These words may turn out to be very good predictors of a bottle's score.
 
 ```{r}
 words_in_descriptions <- words_in_descriptions %>% mutate(X=as.integer(doc_id)) %>% 
@@ -702,7 +704,7 @@ ratings_ML <- ratings %>%
          good_words,
          points)
 
-#Removing bottles for which pric is not available
+#Removing bottles for which price is not available
 
 NAs <- which(is.na(ratings_ML$price))
 ratings_ML <- ratings_ML[-NAs,]
@@ -710,7 +712,7 @@ ratings_ML <- ratings_ML[-NAs,]
 
 ####Modelling
 
-We are now ready to use our data for Machine Learning purposes. We will begin by splitting our **ratings_ML** dataset into a **training_set** and a **testing_set**.
+We are now ready to use our data for Machine Learning purposes. We will begin by splitting our **ratings_ML** dataset into a **train_set** and a **test_set**.
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 # Test set will be 10% of Ratings_ML data
@@ -758,26 +760,28 @@ Here, we get a RMSE of about 3.0455. Not great. We are on average 3 full points 
 To improve on this, we will construct a model with the following structure. We do not want to train our ML algorithms just yet because the computation would take too long.
 
 $$
-Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v+ \hat{b}_w +\hat{b}_va +\hat{b}_p + \varepsilon_{c,t,v,w,va,p}
+Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v+ \hat{b}_w +\hat{b}_{va} +\hat{b}_p + \varepsilon_{c,t,v,w,va,p}
 $$
 
 In this model, $\mu$ is the average rating in the training set.
 
 The various $\hat{b}$ are respectively the country, taster, vintage, winery, variety and province effect. We compute these sequentially such that each effect takes into consideration all the ones before. This is to speed up the process (as opposed to running a very large regression).
 
-Finally, $\varepsilon_{c,t,v,w,va,p}$ is the residual when using only this linear model.
+Finally, $\varepsilon_{c,t,v,w,{va},p}$ is the residual when using only this linear model.
+
+We will be referring to this model as **our linear model*.
 
 Once that model is optimized, we will try to minimize $\varepsilon_{c,t,v,w,va,p}$ by using machine learning algorithms such that:
 
 $$
-\varepsilon_{c,t,v,w,va,p}=Z_{c,t,v,w,va,p}+\varepsilon_{z,c,t,v,w,va,p}
+Y_{c,t,v,w,va,p}=\hat{Y}_{c,t,v,w,va,p}+\hat{Z}_{c,t,v,w,va,p}+\varepsilon_{z,c,t,v,w,va,p}
 $$
 
-where $\varepsilon_{z,c,t,v,w,va,p}$ is what we are striving to minimize and $Z_{c,t,v,w,va,p}$ is the contribution of our machine learning algorithms.
+where $\varepsilon_{z,c,t,v,w,va,p}$ is what we are striving to minimize and $Z_{c,t,v,w,va,p}$ is the contribution of our machine learning algorithms and $\hat{Y}_{c,t,v,w,va,p}$ is the contribution from our linear model described before..
 
 #####Country Effect
 
-Some countries, one average, rate higher than others. We would call this the **country effect**. For each wine, the country effect is calculated as the average of $Y_{c,t,v} - \hat{\mu}$ for each country $c$.
+Some countries, one average, rate higher than others. We would call this the **country effect**. For each wine, the country effect is calculated as the average of $Y_{c,t,v,w,va,p} - \hat{\mu}$ for each country $c$.
 
 We calculate it using this piece of code:
 
@@ -787,7 +791,7 @@ country_avgs <- train_set %>%
   summarize(country_effect = mean(points - average_rating))
 ```
 
-We can see that these estimates vary substantially from -6 to +3.
+We can see that these estimates vary substantially from -6 to +3. Given our average rating is about 88, a country effect of 3 brings the score close to 100.
 
 ```{r}
 country_avgs %>% qplot(country_effect, geom ="histogram", bins = 10, data = ., color = I("black"))
@@ -820,7 +824,7 @@ This is already an improvement. We could dive into regularization of this effect
 
 Now, we turn our attention to tasters. Some of them, as we saw before, tend to rate higher than others. Here we can calculate the **taster effect** which is a taster-specific effect once the **country effect** has been taken into consideration.
 
-To be clear, this is the model we are trying, where $\mu$ is the average rating, $\hat{b}_c$ is the regularized_movie_effect, $\hat{b}_t$ is the user-specific effect and $\varepsilon_{c,t,v,w,va,p}$ is the error term:
+To be clear, this is the model we are trying, where $\mu$ is the average rating, $\hat{b}_c$ is the country effect, $\hat{b}_t$ is the taster effect and $\varepsilon_{c,t,v,w,va,p}$ is the error term:
   
 $$
 Y_{c,t,v,w,va,p} = \mu + \hat{b}_c + \hat{b}_t+ \varepsilon_{c,t,v,w,va,p}
@@ -992,27 +996,12 @@ kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set o
 
 ```
 
-#####Creating a New "Target"
+#####Machine Learning Algorithm
 
-As mentioned before, we have now created this model:
-
-$$
-Y_{c,t,v} = \mu + \hat{b}_c + \hat{b}_t +\hat{b}_v + \varepsilon_{c,t,v}
-$$
-We now want to predict $\varepsilon_{c,t,v}$ using Machine Learning algorithms and the variables we haven't used yet.
-
-we will try to minimize $\varepsilon_{c,t,v}$ by using machine learning algorithms such that:
-
-$$
-\varepsilon_{c,t,v,w,va,p}=Z_{c,t,v,w,va,p}+\varepsilon_{z,c,t,v,w,va,p}
-$$
-
-where $\varepsilon_{z,c,t,v,w,va,p}$ is what we are striving to minimize and $Z_{c,t,v,w,va,p}$ is the contribution of our machine learning algorithms.
-
-Therefore, we need to add avariable to our **Ratings_ML** set that is our current $\varepsilon_{c,t,v,w,va,p}$.
+Below, we train linear regression to minimize the errors when predicting **points** using the predicted values as well as all remaining variables: the price of the bottle as well as the descriptors of the description obtained from our Natural Language Processing section.
 
 ```{r}
-
+# Create predictions for the training set
 predicted_ratings_train <- train_set %>% 
   left_join(country_avgs, by='country') %>%
   left_join(taster_avgs, by='taster_name') %>%
@@ -1020,19 +1009,13 @@ predicted_ratings_train <- train_set %>%
   mutate(pred = average_rating + country_effect + taster_effect+ vintage_effect) %>%
   .$pred
 
+#Add predicted values to both sets
 train_set <- train_set %>% mutate(predicted_ratings = predicted_ratings_train,
                                   epsilon = points - predicted_ratings_train)
 test_set <- test_set %>% mutate(predicted_ratings=predicted_ratings,
                                 epsilon = points - predicted_ratings)
 
-```
-
-#####Machine Learning Algorithms
-
-Below, we train linear regression to minimize the errors when predicting **points** using the predicted values as well as all remaining variables: the price of the bottle as well as the descriptors of the description obtained from our Natural Language Processing section.
-
-```{r}
-
+#Train the model
 glm_trained <- train(points ~ predicted_ratings+ price+Lenght+lexical_diversity+lexical_density+repetition+large_word_count+adjectives_count+noun_count+verb_count+good_words, method="glm", data = train_set )
 
 ```
@@ -1059,7 +1042,7 @@ kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set o
 
 This method further brought down our RMSE to `r glm_RMSE`. That is a total improvement of `r paste(round(100*(naiveRMSE - glm_RMSE)/naiveRMSE,2),"%",sep="")` over our naive method of forecasting the average.
 
-What's more, we've also uncovered that the inclusion of price and the NLP variables improved the RMSE by `r paste(round(100*(country_taster_vintage_winery_variety_province_effect_RMSE - glm_RMSE)/country_taster_vintage_winery_variety_province_effect_RMSE,2),"%",sep="")`from the linear model.
+What's more, we've also uncovered that the inclusion of price and the NLP variables improved the RMSE by `r paste(round(100*(country_taster_vintage_winery_variety_province_effect_RMSE - glm_RMSE)/country_taster_vintage_winery_variety_province_effect_RMSE,2),"%",sep="")` from the linear model.
 
 The importance of each variable can be illustrated as follows:
 
@@ -1083,9 +1066,16 @@ Then, we trained a linear regression algorithm on the data and managed to furthe
 
 The most important variable in the regression was price, followed by our predicted values from our linear model, and finally by the presence of key words that are often associated with good wine.
 
-Here they are again, for your convenience: `r good_predictor_words`.
+Here they are again, for your convenience: **`r good_predictor_words`**.
 
 To further improve the accuracy of this model, we would suggest two main paths:
 
 1. Experimenting with different features in the NLP of the descriptions
 2. Experimenting with different machine learning algorithms to determine whether some may perform better than linear regression. We have decided against it here for the sake of computing time.
+
+```{r, include=FALSE}
+end_time <- Sys.time()
+run_time <- end_time-start_time
+```
+
+Note: This report took `r round(as.numeric(run_time),2)` minutes to populate.
